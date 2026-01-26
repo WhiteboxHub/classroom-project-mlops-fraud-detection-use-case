@@ -1,0 +1,35 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "fraud_detection_system"
+version = "0.1.0"
+description = "MLOps Fraud Detection System for XYZ Corp"
+authors = [
+  { name="MLOps Team", email="mlops@xyzcorp.com" },
+]
+readme = "README.md"
+requires-python = ">=3.9"
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Operating System :: OS Independent",
+]
+dependencies = [
+    "numpy",
+    "pandas",
+    "scikit-learn",
+    "mlflow",
+    "dvc",
+    "fastapi",
+    "uvicorn",
+    "pydantic",
+    "redis"
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest",
+    "black",
+    "flake8"
+]

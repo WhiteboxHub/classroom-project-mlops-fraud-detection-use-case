@@ -1,0 +1,16 @@
+FROM python:3.9-slim
+
+WORKDIR /app
+
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Install DVC for data pulling (optional if data mounted)
+# RUN pip install dvc
+
+COPY src/ src/
+COPY data/ data/ 
+# In a real setup, we'd use dvc pull here or mount the volume.
+# For this dockerfile to work standalone we assume data is copied.
+
+CMD ["python", "src/models/train.py"]

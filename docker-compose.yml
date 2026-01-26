@@ -1,0 +1,35 @@
+services:
+  mlflow:
+    image: ghcr.io/mlflow/mlflow:v2.10.0
+    container_name: mlflow_server
+    ports:
+      - "5000:5000"
+    volumes:
+      - ./mlruns:/mlruns
+    command: >
+      mlflow server 
+      --backend-store-uri sqlite:///mlruns/mlflow.db
+      --default-artifact-root file:///mlruns
+      --host 0.0.0.0
+
+  redis:
+    image: redis:7-alpine
+    container_name: redis_feature_store
+    ports:
+      - "6379:6379"
+
+  api:
+    build:
+      context: .
+      dockerfile: infrastructure/Dockerfile.api
+    container_name: fraud_api
+    ports:
+      - "8000:8000"
+    environment:
+      - REDIS_HOST=redis
+    depends_on:
+      - redis
+      - mlflow
+    volumes:
+      - ./mlruns:/app/mlruns  # Mount local mlruns so API can see the model trained locally
+      - ./src:/app/src        # Hot reload for dev
