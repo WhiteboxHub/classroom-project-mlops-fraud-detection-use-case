@@ -38,7 +38,20 @@ def load_latest_model():
     run_id = runs.iloc[0].run_id
     model_uri = f"runs:/{run_id}/model"
     print(f"Loading model from {model_uri}...")
-    loaded_model = mlflow.sklearn.load_model(model_uri)
+    
+    try:
+        loaded_model = mlflow.sklearn.load_model(model_uri)
+    except Exception:
+        # Fallback 1: Try local mlruns path
+        try:
+            print("Standard load failed. Attempting fallback via local path...")
+            artifact_path = os.path.join("mlruns", experiment.experiment_id, run_id, "artifacts", "model")
+            loaded_model = mlflow.sklearn.load_model(artifact_path)
+        except Exception:
+            # Fallback 2: Try explicit local storage
+            print("MLruns fallback failed. Attempting model_storage...")
+            loaded_model = mlflow.sklearn.load_model("model_storage")
+
     return loaded_model, run_id
 
 @asynccontextmanager

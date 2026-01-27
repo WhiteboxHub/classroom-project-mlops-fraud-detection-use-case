@@ -16,7 +16,7 @@ class FeatureStore:
         try:
             self.redis_client = redis.Redis(host=redis_host, port=redis_port, decode_responses=True, socket_connect_timeout=1)
             self.redis_client.ping()
-        except redis.ConnectionError:
+        except (redis.ConnectionError, redis.exceptions.TimeoutError):
             print("Warning: Could not connect to Redis. Online features will not work/be saved.")
             self.redis_client = None
 

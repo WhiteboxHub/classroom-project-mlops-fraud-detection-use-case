@@ -50,67 +50,140 @@ This repository contains an end-to-end MLOps implementation for critical fraud d
 ## ⚡ Quick Start (Local)
 
 ### 1. Prerequisites
-- Python 3.9+
-- Docker & Docker Compose
-- Git
+- **Python 3.9+** (Ensure it's added to your PATH)
+- **Docker Desktop** (Make sure it is running)
+- **Git**
 
 ### 2. Installation
+
+Open your terminal (PowerShell or Command Prompt) and run:
+
 ```bash
-# Create venv
-python3 -m venv venv
-source venv/bin/activate
+# Create virtual environment
+python -m venv venv
+
+# Activate virtual environment (Windows)
+.\venv\Scripts\activate
 
 # Install dependencies
 pip install -r requirements.txt
 ```
 
 ### 3. Generate Data
-Create synthetic transaction data mimicking fraud patterns:
+Create synthetic transaction data mimicking fraud patterns. This script creates `data/raw/transactions.csv`.
+
 ```bash
 python src/utils/generate_data.py
-# Initialize DVC (if not already)
+
+# Initialize DVC (first time only)
 dvc init
 dvc add data/raw/transactions.csv
 ```
 
 ### 4. Run Tests
-Verify feature engineering logic:
+Verify that the feature engineering logic functions correctly:
+
 ```bash
 pytest tests/
 ```
 
 ### 5. Train Model
-Run the training pipeline with K-Fold validation:
+Run the training pipeline. This script loads data, calculates features, performs 5-Fold Cross Validation, and logs metrics to MLflow.
+
 ```bash
 python src/models/train.py
 ```
-*Check `./mlruns` (or `mlflow ui`) to see experiments.*
+*You can examine the results in the MLflow UI (after starting the full stack below).*
 
 ### 6. Drift Detection
-Simulate and check for data drift:
+Run a simulation to check for data drift between training data and new incoming data:
+
 ```bash
 python src/monitoring/drift.py
 ```
 
-### 7. Run Inference Service
-Start the full stack (API + MLflow + Redis):
+### 7. Run Inference Service (Full Stack)
+Start the entire MLOps stack, including the API, MLflow server, and Redis feature store.
+
 ```bash
 docker-compose up --build
 ```
 
-**Test Prediction:**
-```bash
-curl -X POST "http://localhost:8000/predict" \
--H "Content-Type: application/json" \
--d '{
+**Access Services:**
+- **FastAPI Docs**: [http://localhost:8000/docs](http://localhost:8000/docs)
+- **MLflow UI**: [http://localhost:5000](http://localhost:5000)
+
+---
+
+### 📩 Test Prediction
+
+You have multiple ways to test the API once the system is running:
+
+#### 1. Swagger UI (Easiest)
+Interact with the API directly from your browser:
+1.  Navigate to [http://localhost:8000/docs](http://localhost:8000/docs).
+2.  Expand the `POST /predict` endpoint.
+3.  Click **Try it out**.
+4.  Paste the following JSON into the Request Body:
+```json
+{
   "timestamp": "2023-10-27T10:00:00",
-  "customer_id": "C123456", 
-  "merchant_id": "M_TEST", 
-  "amount": 5000.0, 
-  "lat": 50.0, 
-  "long": 50.0
-}'
+  "customer_id": "C999999",
+  "merchant_id": "M_SCAM",
+  "amount": 9000.0,
+  "lat": 45.0,
+  "long": 45.0
+}
 ```
+5.  Click **Execute** and check the response.
+
+#### 2. Windows PowerShell
+Open a new terminal window:
+```powershell
+$body = @{
+    timestamp = "2023-10-27T10:00:00",
+    customer_id = "C999999",
+    merchant_id = "M_SCAM",
+    amount = 9000.0,
+    lat = 45.0,
+    long = 45.0
+} | ConvertTo-Json
+
+Invoke-RestMethod -Uri "http://localhost:8000/predict" -Method Post -ContentType "application/json" -Body $body
+```
+
+#### 3. Sample Data
+Use these JSON snippets for testing in Swagger UI or Postman:
+
+**High Value Fraud Pattern:**
+```json
+{
+  "timestamp": "2023-10-27T12:00:00",
+  "customer_id": "C_TEST_01",
+  "merchant_id": "M_TEST_01",
+  "amount": 5500.00,
+  "lat": 40.71,
+  "long": -74.00
+}
+```
+
+**Normal Transaction (Low Amount):**
+```json
+{
+  "timestamp": "2023-10-27T12:05:00",
+  "customer_id": "C_TEST_02",
+  "merchant_id": "M_TEST_02",
+  "amount": 25.50,
+  "lat": 40.71,
+  "long": -74.00
+}
+```
+
+#### 4. Troubleshooting
+- **Connection Refused**: Ensure `docker-compose` is running.
+- **Internal Server Error**: Check the Docker terminal output for Python errors.
+- **Verify Training**: Check [http://localhost:5000](http://localhost:5000) for MLflow experiments.
+- **Dependency Mismatch**: If you see `InconsistentVersionWarning`, ensure local and Docker use the same `scikit-learn` version (currently `1.6.1`). Fix by running `pip install -r requirements.txt` locally and retraining.
 
 **Expected Response**:
 ```json
@@ -129,10 +202,10 @@ curl -X POST "http://localhost:8000/predict" \
    - Run `pytest` to ensure logic validity.
 
 2. **Training**:
-   - `train.py` pulls data via DVC (automating `dvc pull`).
-   - Feature Store saves offline parquet.
-   - Model and metrics logged to MLflow under `fraud_detection_baseline`.
+   - `train.py` reads local DVC-tracked data.
+   - Feature Store saves offline parquet files for consistent training data.
+   - Model and metrics are logged to MLflow experiment `fraud_detection_baseline`.
 
 3. **Deployment**:
    - `app.py` loads the latest Production model from MLflow.
-   - Retrieves online features from Redis (populated by ingestion pipeline - mocked for POC).
+   - Retrieves online features from Redis (populated by ingestion pipeline - mocked for this Phase 1 POC).

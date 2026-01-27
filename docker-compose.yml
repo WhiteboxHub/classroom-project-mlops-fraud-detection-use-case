@@ -32,4 +32,5 @@ services:
       - mlflow
     volumes:
       - ./mlruns:/app/mlruns  # Mount local mlruns so API can see the model trained locally
+      - ./model_storage:/app/model_storage # Mount explicit model storage
       - ./src:/app/src        # Hot reload for dev

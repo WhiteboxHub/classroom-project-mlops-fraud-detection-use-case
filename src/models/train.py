@@ -88,6 +88,16 @@ def train():
         # Log Model
         mlflow.sklearn.log_model(pipeline, "model")
         print("Final model saved to MLflow.")
+        
+        # Explicitly save to local path for Docker reliability
+        import shutil
+        local_model_path = "model_storage"
+        if os.path.exists(local_model_path):
+            shutil.rmtree(local_model_path)
+        
+        print(f"Saving model locally to {local_model_path}...")
+        mlflow.sklearn.save_model(pipeline, local_model_path)
+        print("Model saved locally.")
 
 if __name__ == "__main__":
     train()
