@@ -27,9 +27,10 @@ services:
       - "8000:8000"
     environment:
       - REDIS_HOST=redis
+      - MLFLOW_TRACKING_DIR=/mlruns
     depends_on:
       - redis
       - mlflow
     volumes:
-      - ./mlruns:/app/mlruns  # Mount local mlruns so API can see the model trained locally
+      - ./mlruns:/mlruns  # Mount local mlruns so API can see the model trained locally
       - ./src:/app/src        # Hot reload for dev
