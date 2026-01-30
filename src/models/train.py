@@ -16,9 +16,10 @@ from src.features.features import calculate_features
 from src.features.feature_store import FeatureStore
 
 def train():
-    mlflow.set_tracking_uri("file:./mlruns")
+    MLFLOW_DIR = os.getenv("MLFLOW_TRACKING_DIR", "./mlruns")
+    mlflow.set_tracking_uri(f"file:{MLFLOW_DIR}")
     mlflow.set_experiment("fraud_detection_baseline")
-    
+
     with mlflow.start_run() as run:
         print("Loading data...")
         df = pd.read_csv("data/raw/transactions.csv")

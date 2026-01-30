@@ -40,7 +40,7 @@ def generate_data(n_transactions=10000):
         "merchant_id": merchant_ids,
         "amount": amounts,
         "lat": lat,
-        "long": long
+        "long": long    
     })
     
     # Simulate Fraud
