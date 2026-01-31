@@ -1,0 +1,11 @@
+numpy
+pandas
+scikit-learn==1.6.1
+mlflow
+dvc
+fastapi
+uvicorn
+pydantic
+redis
+requests
+pytest
