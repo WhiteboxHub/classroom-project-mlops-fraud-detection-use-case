@@ -110,6 +110,8 @@ ENV/
 env.bak/
 venv.bak/
 myvenv/
+venvs/
+vnevs/
 
 
 # Spyder project settings
@@ -142,3 +144,12 @@ cython_debug/
 !/data/**/.gitignore
 mlruns/
 .dvc/tmp
+
+# Project specific artifacts
+model_storage/
+Archive.zip
+
+# OS and IDE
+.DS_Store
+.vscode/
+.idea/

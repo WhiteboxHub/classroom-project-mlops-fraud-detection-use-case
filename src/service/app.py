@@ -25,41 +25,6 @@ def load_latest_model():
     Loads the latest MLflow model from the models/ directory
     (because this project stores models there, not in run artifacts).
     """
-<<<<<<< HEAD
-    mlflow.set_tracking_uri("file:./mlruns")
-    experiment = mlflow.get_experiment_by_name("fraud_detection_baseline")
-    if not experiment:
-        raise Exception("Experiment 'fraud_detection_baseline' not found. Run training first.")
-    
-    # Search runs, order by start_time desc
-    runs = mlflow.search_runs(
-        experiment_ids=[experiment.experiment_id],
-        order_by=["start_time DESC"],
-        max_results=1
-    )
-    
-    if runs.empty:
-        raise Exception("No runs found in experiment.")
-    
-    run_id = runs.iloc[0].run_id
-    model_uri = f"runs:/{run_id}/model"
-    print(f"Loading model from {model_uri}...")
-    
-    try:
-        loaded_model = mlflow.sklearn.load_model(model_uri)
-    except Exception:
-        # Fallback 1: Try local mlruns path
-        try:
-            print("Standard load failed. Attempting fallback via local path...")
-            artifact_path = os.path.join("mlruns", experiment.experiment_id, run_id, "artifacts", "model")
-            loaded_model = mlflow.sklearn.load_model(artifact_path)
-        except Exception:
-            # Fallback 2: Try explicit local storage
-            print("MLruns fallback failed. Attempting model_storage...")
-            loaded_model = mlflow.sklearn.load_model("model_storage")
-
-    return loaded_model, run_id
-=======
     MLFLOW_PATH = os.getenv("MLFLOW_TRACKING_DIR", "/mlruns")
     mlflow.set_tracking_uri(f"file:{MLFLOW_PATH}")
 
@@ -90,7 +55,6 @@ def load_latest_model():
 
     return loaded_model, os.path.basename(latest_model_dir)
 
->>>>>>> 848babc87302be09bec1091cd2c7c7c01ff8eb83
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
