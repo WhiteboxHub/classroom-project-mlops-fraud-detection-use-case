@@ -18,6 +18,27 @@ services:
     ports:
       - "6379:6379"
 
+  trainer:
+    build:
+      context: .
+      dockerfile: infrastructure/Dockerfile.api
+    container_name: fraud_trainer
+    environment:
+      - REDIS_HOST=redis
+      - MLFLOW_TRACKING_URI=http://mlflow:5000
+    depends_on:
+      - redis
+      - mlflow
+    volumes:
+      - ./mlruns:/mlruns
+      - ./src:/app/src
+      - ./data:/app/data
+    command: >
+      sh -c "
+      python src/utils/generate_data.py &&
+      python src/models/train.py
+      "
+
   api:
     build:
       context: .
@@ -26,11 +47,14 @@ services:
     ports:
       - "8000:8000"
     environment:
+      - MLFLOW_TRACKING_URI=http://mlflow:5000
       - REDIS_HOST=redis
-      - MLFLOW_TRACKING_DIR=/mlruns
     depends_on:
       - redis
       - mlflow
+      - trainer
     volumes:
-      - ./mlruns:/mlruns  # Mount local mlruns so API can see the model trained locally
-      - ./src:/app/src        # Hot reload for dev
+      - ./mlruns:/mlruns
+      - ./src:/app/src
+      - ./data:/app/data
+    command: uvicorn src.service.app:app --host 0.0.0.0 --port 8000

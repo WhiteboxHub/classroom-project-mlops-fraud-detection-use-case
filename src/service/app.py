@@ -1,139 +1,160 @@
 from fastapi import FastAPI, HTTPException
 from contextlib import asynccontextmanager
 import pandas as pd
-import os
-import sys
 import mlflow
-import mlflow.pyfunc
-import glob
-import numpy as np
+import mlflow.sklearn
+import os, sys, time
 
-# Add src to path
 sys.path.append(os.path.join(os.path.dirname(__file__), '..', '..'))
+
 from src.features.feature_store import FeatureStore
 from src.features.features import add_time_features
 from src.service.schemas import TransactionRequest, PredictionResponse
 
-# Global variables
-model = None
+lr_model = None
+xgb_model = None
 feature_store = None
 RUN_ID = None
 
+ML_THRESHOLD = 0.25   # ensemble threshold
 
+FEATURES = [
+    "amount",
+    "lat",
+    "long",
+    "hour_of_day",
+    "day_of_week",
+    "is_night",
+    "count_last_1h",
+    "amount_last_1h",
+    "avg_amount_7d",
+    "amount_ratio"
+]
+
+# ---------------- LOAD MODELS ----------------
 def load_latest_model():
-    """
-    Loads the latest MLflow model from the models/ directory
-    (because this project stores models there, not in run artifacts).
-    """
-    MLFLOW_PATH = os.getenv("MLFLOW_TRACKING_DIR", "/mlruns")
-    mlflow.set_tracking_uri(f"file:{MLFLOW_PATH}")
+    mlflow.set_tracking_uri(os.getenv("MLFLOW_TRACKING_URI", "http://mlflow:5000"))
 
-    print("Using MLflow path:", MLFLOW_PATH)
+    EXP_NAME = "fraud_detection_xgb"
+    exp = mlflow.get_experiment_by_name(EXP_NAME)
+    if exp is None:
+        raise Exception("Experiment not created yet")
 
-    # Find experiment folder
-    exp_dirs = glob.glob(os.path.join(MLFLOW_PATH, "*"))
-    if not exp_dirs:
-        raise Exception("No experiments found in mlruns.")
+    runs = mlflow.search_runs(
+        experiment_ids=[exp.experiment_id],
+        order_by=["start_time desc"],
+        max_results=1
+    )
 
-    # Take latest experiment
-    exp_dir = sorted(exp_dirs, key=os.path.getmtime)[-1]
+    if runs.empty:
+        raise Exception("No runs in experiment yet")
 
-    models_dir = os.path.join(exp_dir, "models")
-    if not os.path.exists(models_dir):
-        raise Exception("No models directory found in mlruns experiment.")
+    run_id = runs.iloc[0]["run_id"]
 
-    model_versions = glob.glob(os.path.join(models_dir, "m-*"))
-    if not model_versions:
-        raise Exception("No model versions found in models directory.")
+    lr_uri = f"runs:/{run_id}/lr_model"
+    xgb_uri = f"runs:/{run_id}/xgb_model"
 
-    latest_model_dir = sorted(model_versions, key=os.path.getmtime)[-1]
-    model_artifact_path = os.path.join(latest_model_dir, "artifacts")
+    print("Loading LR model from:", lr_uri)
+    print("Loading XGB model from:", xgb_uri)
 
-    print(f"Loading model from {model_artifact_path}...")
+    lr_model = mlflow.sklearn.load_model(lr_uri)
+    xgb_model = mlflow.sklearn.load_model(xgb_uri)
 
-    loaded_model = mlflow.pyfunc.load_model(model_artifact_path)
-
-    return loaded_model, os.path.basename(latest_model_dir)
+    return lr_model, xgb_model, run_id
 
 
+# ---------------- LIFESPAN ----------------
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global model, feature_store, RUN_ID
-    try:
-        model, RUN_ID = load_latest_model()
-        feature_store = FeatureStore(redis_host=os.getenv("REDIS_HOST", "localhost"))
-        print("Model and Feature Store initialized.")
-    except Exception as e:
-        print("FATAL: Model could not be loaded")
-        print(e)
-        raise e
+    global lr_model, xgb_model, feature_store, RUN_ID
+
+    for i in range(60):
+        try:
+            lr_model, xgb_model, RUN_ID = load_latest_model()
+            print("Models loaded successfully")
+            break
+        except Exception as e:
+            print(f"Waiting for models... ({i})", e)
+            time.sleep(2)
+
+    if lr_model is None or xgb_model is None:
+        raise RuntimeError("Models could not be loaded")
+
+    feature_store = FeatureStore(redis_host=os.getenv("REDIS_HOST", "redis"))
+    print("Models and Feature Store initialized.")
     yield
 
 
-app = FastAPI(title="Fraud Detection API", version="0.1.0", lifespan=lifespan)
+app = FastAPI(title="Fraud Detection API", version="1.0.0", lifespan=lifespan)
 
 
+# ---------------- HEALTH ----------------
 @app.get("/health")
 def health_check():
     return {"status": "ok", "model_version": RUN_ID}
 
 
+# ---------------- PREDICT ----------------
 @app.post("/predict", response_model=PredictionResponse)
-def predict(request: TransactionRequest):
-    if not model:
-        raise HTTPException(status_code=503, detail="Model not loaded")
+def predict(req: TransactionRequest):
+    if lr_model is None or xgb_model is None:
+        raise HTTPException(status_code=503, detail="Models not loaded")
 
-    # 1. Fetch Online Features from Feature Store
-    customer_features = feature_store.get_online_features(request.customer_id)
+    customer_features = feature_store.get_online_features(req.customer_id) or {}
 
-    if not customer_features:
-        customer_features = {
-            "count_last_1h": 0,
-            "amount_last_1h": 0,
-            "count_last_24h": 0,
-            "amount_last_24h": 0
-        }
-
-    # 2. Compute Real-time Features
-    tx_data = request.dict()
-    df = pd.DataFrame([tx_data])
-
+    df = pd.DataFrame([req.dict()])
     df = add_time_features(df)
 
     for k, v in customer_features.items():
         if k not in df.columns:
             df[k] = v
 
-    required_features = [
-        'amount', 'lat', 'long', 'hour_of_day', 'day_of_week',
-        'count_last_1h', 'amount_last_1h', 'count_last_24h', 'amount_last_24h'
-    ]
+    for col in FEATURES:
+        if col not in df.columns:
+            df[col] = 0.0
 
-    for feat in required_features:
-        if feat not in df.columns:
-            df[feat] = 0.0
+    df["avg_amount_7d"] = df["avg_amount_7d"].fillna(df["amount"])
+    df.loc[df["avg_amount_7d"] == 0, "avg_amount_7d"] = df["amount"]
 
-    X = df[required_features]
+    df["amount_ratio"] = df["amount"] / df["avg_amount_7d"]
 
-    # ✅ PyFunc prediction
-    y_pred = model.predict(X)
+    X = df[FEATURES]
 
-    if isinstance(y_pred, (list, tuple, np.ndarray, pd.Series)):
-        prob = float(y_pred[0])
+    lr_prob = float(lr_model.predict_proba(X)[0][1])
+    xgb_prob = float(xgb_model.predict_proba(X)[0][1])
+
+    final_prob = 0.5 * lr_prob + 0.5 * xgb_prob
+
+    # ---------- HYBRID RULE + ENSEMBLE ----------
+    has_history = "avg_amount_7d" in customer_features
+
+    # Rule-based fraud (always trusted)
+    if df["amount_ratio"].iloc[0] > 3:
+        prediction = "FRAUD"
+        reason = "amount_spike"
+
+    elif df["is_night"].iloc[0] == 1 and df["amount"].iloc[0] > 2000:
+        prediction = "FRAUD"
+        reason = "night_high_value"
+
+    # ML only if history exists
+    elif has_history and final_prob >= 0.6:
+        prediction = "FRAUD"
+        reason = "ml_probability"
+
     else:
-        prob = float(y_pred)
+        prediction = "LEGIT"
+        reason = "normal_behavior"
 
-    prediction = "FRAUD" if prob > 0.5 else "LEGIT"
-
-    #   Safe explanation for PyFunc model
-    explanation = {
-    "model_confidence": float(prob)
-    } 
-
+    df["timestamp"] = df["timestamp"].astype(str)
+    feature_store.save_online(df)
 
     return PredictionResponse(
         prediction=prediction,
-        probability=prob,
-        explanation=explanation,
+        probability=final_prob,
+        explanation={
+            "model_confidence": final_prob,
+            "decision_reason": reason
+        },
         model_version=RUN_ID
     )

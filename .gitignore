@@ -145,11 +145,4 @@ cython_debug/
 mlruns/
 .dvc/tmp
 
-# Project specific artifacts
-model_storage/
-Archive.zip
-
-# OS and IDE
 .DS_Store
-.vscode/
-.idea/
