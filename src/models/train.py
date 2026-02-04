@@ -1,104 +1,85 @@
 import pandas as pd
-import numpy as np
 import mlflow
 import mlflow.sklearn
+import xgboost as xgb
 from sklearn.linear_model import LogisticRegression
-from sklearn.metrics import precision_score, recall_score, f1_score, roc_auc_score, average_precision_score
-from sklearn.preprocessing import StandardScaler
+from sklearn.metrics import precision_score, recall_score, f1_score, roc_auc_score
 from sklearn.pipeline import Pipeline
-from sklearn.compose import ColumnTransformer
-import sys
-import os
+from sklearn.preprocessing import StandardScaler
+import os, sys
 
-# Add src to path
 sys.path.append(os.path.join(os.path.dirname(__file__), '..', '..'))
 from src.features.features import calculate_features
-from src.features.feature_store import FeatureStore
 
-def train():
-    MLFLOW_DIR = os.getenv("MLFLOW_TRACKING_DIR", "./mlruns")
-    mlflow.set_tracking_uri(f"file:{MLFLOW_DIR}")
-    mlflow.set_experiment("fraud_detection_baseline")
+mlflow.set_tracking_uri(os.getenv("MLFLOW_TRACKING_URI", "http://mlflow:5000"))
+mlflow.set_experiment("fraud_detection_xgb")
 
-    with mlflow.start_run() as run:
-        print("Loading data...")
-        df = pd.read_csv("data/raw/transactions.csv")
-        
-        print("Calculating features...")
-        df_features = calculate_features(df)
-        
-        # Save features to offline store
-        fs = FeatureStore()
-        fs.save_offline(df_features, "training_features")
-        
-        target = 'is_fraud'
-        drop_cols = ['timestamp', 'customer_id', 'merchant_id', 'is_fraud']
-        
-        # Prepare X and y
-        X = df_features.drop(columns=drop_cols)
-        y = df_features[target]
-        
-        print(f"Total samples: {len(X)}")
-        print(f"Features: {X.columns.tolist()}")
-        
-        mlflow.log_param("model_type", "LogisticRegression")
-        mlflow.log_param("cv_folds", 5)
-        
-        # Define Pipeline
-        pipeline = Pipeline([
-            ('scaler', StandardScaler()),
-            ('model', LogisticRegression(class_weight='balanced', max_iter=1000, C=1.0))
-        ])
-        
-        # Stratified K-Fold
-        from sklearn.model_selection import StratifiedKFold
-        skf = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
-        
-        metrics = {"precision": [], "recall": [], "f1": [], "roc_auc": [], "pr_auc": []}
-        
-        print("Starting 5-Fold Cross Validation...")
-        fold = 1
-        for train_index, test_index in skf.split(X, y):
-            X_train_fold, X_test_fold = X.iloc[train_index], X.iloc[test_index]
-            y_train_fold, y_test_fold = y.iloc[train_index], y.iloc[test_index]
-            
-            pipeline.fit(X_train_fold, y_train_fold)
-            
-            y_pred = pipeline.predict(X_test_fold)
-            y_prob = pipeline.predict_proba(X_test_fold)[:, 1]
-            
-            metrics["precision"].append(precision_score(y_test_fold, y_pred))
-            metrics["recall"].append(recall_score(y_test_fold, y_pred))
-            metrics["f1"].append(f1_score(y_test_fold, y_pred))
-            metrics["roc_auc"].append(roc_auc_score(y_test_fold, y_prob))
-            metrics["pr_auc"].append(average_precision_score(y_test_fold, y_prob))
-            
-            print(f"Fold {fold} - ROC AUC: {metrics['roc_auc'][-1]:.4f}")
-            fold += 1
-            
-        # Log Average Metrics
-        for metric, values in metrics.items():
-            avg_val = np.mean(values)
-            mlflow.log_metric(f"avg_{metric}", avg_val)
-            print(f"Avg {metric}: {avg_val:.4f}")
-            
-        # Retrain on Full Dataset for Production
-        print("Retraining on full dataset...")
-        pipeline.fit(X, y)
-        
-        # Log Model
-        mlflow.sklearn.log_model(pipeline, "model")
-        print("Final model saved to MLflow.")
-        
-        # Explicitly save to local path for Docker reliability
-        import shutil
-        local_model_path = "model_storage"
-        if os.path.exists(local_model_path):
-            shutil.rmtree(local_model_path)
-        
-        print(f"Saving model locally to {local_model_path}...")
-        mlflow.sklearn.save_model(pipeline, local_model_path)
-        print("Model saved locally.")
+print("Loading data...")
+df = pd.read_csv("data/raw/transactions.csv")
 
-if __name__ == "__main__":
-    train()
+print("Calculating features...")
+df_feat = calculate_features(df)
+
+FEATURES = [
+    "amount",
+    "lat",
+    "long",
+    "hour_of_day",
+    "day_of_week",
+    "is_night",
+    "count_last_1h",
+    "amount_last_1h",
+    "avg_amount_7d",
+    "amount_ratio"
+]
+
+X = df_feat[FEATURES]
+y = df_feat["is_fraud"]
+
+scale_pos_weight = len(y[y == 0]) / len(y[y == 1])
+
+# ---------------- MODELS ----------------
+lr_model = LogisticRegression(
+    class_weight="balanced",
+    max_iter=500
+)
+
+xgb_model = xgb.XGBClassifier(
+    objective="binary:logistic",
+    scale_pos_weight=scale_pos_weight,
+    eval_metric="aucpr",
+    max_depth=5,
+    n_estimators=200,
+    learning_rate=0.08,
+    random_state=42
+)
+
+lr_pipeline = Pipeline([
+    ("scaler", StandardScaler()),
+    ("model", lr_model)
+])
+
+xgb_pipeline = Pipeline([
+    ("scaler", StandardScaler()),
+    ("model", xgb_model)
+])
+
+with mlflow.start_run():
+    lr_pipeline.fit(X, y)
+    xgb_pipeline.fit(X, y)
+
+    lr_prob = lr_pipeline.predict_proba(X)[:, 1]
+    xgb_prob = xgb_pipeline.predict_proba(X)[:, 1]
+
+    ensemble_prob = 0.5 * lr_prob + 0.5 * xgb_prob
+    ensemble_pred = (ensemble_prob >= 0.25).astype(int)
+
+    mlflow.log_metric("precision", precision_score(y, ensemble_pred))
+    mlflow.log_metric("recall", recall_score(y, ensemble_pred))
+    mlflow.log_metric("f1", f1_score(y, ensemble_pred))
+    mlflow.log_metric("roc_auc", roc_auc_score(y, ensemble_prob))
+
+    mlflow.sklearn.log_model(lr_pipeline, "lr_model")
+    mlflow.sklearn.log_model(xgb_pipeline, "xgb_model")
+
+print("Both models trained and logged to MLflow")
