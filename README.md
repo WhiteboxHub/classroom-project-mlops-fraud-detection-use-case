@@ -1,138 +1,325 @@
-# MLOps Fraud Detection System - Phase 1
+# 🛡️ MLOps Fraud Detection System – Phase 1 (Real-Time, Ensemble Model)
 
-This repository contains an end-to-end MLOps implementation for critical fraud detection, adhering to strict operational requirements for latency, reproducibility, and explainability.
+This repository contains an end-to-end **MLOps fraud detection system** designed to simulate **real-world banking fraud detection** with:
+
+- Offline training  
+- Online feature store (Redis)  
+- Real-time inference (FastAPI)  
+- MLflow model tracking  
+- Dockerized deployment  
+
+The system follows an **industry-style architecture**:
+
+Batch training → Feature store → Model registry → Real-time inference
+
+---
 
 ## 🚀 Features
 
-- **Offline Training Pipeline**:
-  - Reproducible data with **DVC**.
-  - Experiment tracking with **MLflow**.
-  - **Stratified K-Fold Cross Validation** for robust evaluation.
-  - Logistic Regression with class weighting for imbalanced data.
+### ✅ Offline Training Pipeline
+- Synthetic transaction data generation with realistic fraud patterns.
+- Feature engineering:
+  - **Velocity features**: `count_last_1h`, `amount_last_1h`
+  - **Behavioral features**: `avg_amount_7d`, `amount_ratio`
+  - **Time features**: `hour_of_day`, `day_of_week`, `is_night`
+- Class-imbalanced handling using `scale_pos_weight`.
+- **Two models are trained together**:
+  - Logistic Regression (baseline, stable linear model)
+  - XGBoost (non-linear boosted tree model)
+- Metrics logged to **MLflow**:
+  - Precision  
+  - Recall  
+  - F1-score  
+  - ROC-AUC  
 
-- **Feature Store**:
-  - Consistent feature logic for training (Batch/Parquet) and inference (Online/Redis).
-  - Time-Window features (Velocity: `count_last_1h`, `amount_last_24h`).
+Both models are logged in the same MLflow run as:
+- `lr_model`
+- `xgb_model`
 
-- **Inference Service**:
-  - **FastAPI** application serving predictions < 100ms.
-  - Local Explainability (Top contributing features).
-  - Pydantic validation.
+---
 
-- **Monitoring & Observability**:
-  - **Drift Detection** using Kolmogorov-Smirnov (KS) test.
-  - Dockerized stack for easy deployment.
+### 🧠 Feature Store (Offline + Online)
+- **Offline (training time)**:
+  - Features are computed using `calculate_features()`:
+    - Time features from timestamp
+    - Rolling transaction counts and sums
+    - Customer behavioral averages
+- **Online (inference time)**:
+  - Redis stores the **latest customer profile**:
+    - `avg_amount_7d`
+    - `count_last_1h`
+    - `amount_last_1h`
+    - `amount_ratio`
+- Same feature logic is used for:
+  - Training
+  - Inference  
+This guarantees **feature consistency** (no training-serving skew).
+
+---
+
+### ⚡ Inference Service (FastAPI)
+- REST API for fraud prediction
+- Loads latest MLflow models automatically:
+  - Logistic Regression model
+  - XGBoost model
+- Fetches customer history from Redis
+- Computes real-time features
+- Produces:
+  - Prediction (`FRAUD` or `LEGIT`)
+  - Fraud probability
+  - Explanation
+  - Model version
+
+---
+
+### 🤖 Ensemble Prediction Logic
+
+The system uses a **hybrid decision strategy**:
+
+#### 1️⃣ ML Ensemble Probability
+
+```
+lr_prob = LogisticRegression.predict_proba()
+xgb_prob = XGBoost.predict_proba()
+
+final_prob = 0.5 * lr_prob + 0.5 * xgb_prob
+```
+
+#### 2️⃣ Rule-Based Safety Layer (Business Logic)
+
+Certain fraud rules always override ML:
+- If `amount_ratio > 3` → FRAUD  
+- If `is_night == 1` and `amount > 2000` → FRAUD  
+
+#### 3️⃣ Final Decision
+- If rule-based fraud → `FRAUD`
+- Else if ensemble probability ≥ threshold → `FRAUD`
+- Else → `LEGIT`
+
+This mimics **real bank systems** where:
+ML + deterministic rules are combined.
+
+---
+
+### 🐳 Dockerized Stack
+- FastAPI (Inference API)
+- MLflow (Model tracking)
+- Redis (Online feature store)
+- Trainer service (auto-trains on startup)
+
+---
 
 ## 🛠️ Tech Stack
 
 - **Language**: Python 3.9+
-- **Frameworks**: FastAPI, scikit-learn, pandas
-- **MLOps**: MLflow, DVC, Docker, Redis
+- **ML**: scikit-learn, XGBoost, pandas
+- **API**: FastAPI, Pydantic
+- **MLOps**: MLflow, Redis, Docker, Docker Compose
+
+---
 
 ## 📂 Project Structure
 
 ```bash
 .
-├── data/                   # Data storage (DVC tracked)
-├── infrastructure/         # Docker configs
+├── data/
+│   └── raw/
+│       └── transactions.csv
+├── infrastructure/
+│   └── Dockerfile.api
 ├── src/
-│   ├── features/           # Feature engineering logic
-│   ├── models/             # Training scripts
-│   ├── monitoring/         # Drift detection
-│   ├── service/            # FastAPI app
-│   └── utils/              # Data generation
-├── tests/                  # Unit tests
+│   ├── features/
+│   │   ├── features.py
+│   │   └── feature_store.py
+│   ├── models/
+│   │   └── train.py
+│   ├── service/
+│   │   ├── app.py
+│   │   └── schemas.py
+│   └── utils/
+│       └── generate_data.py
 ├── docker-compose.yml
 ├── requirements.txt
 └── README.md
 ```
 
+---
+
 ## ⚡ Quick Start (Local)
 
-### 1. Prerequisites
+### 1️⃣ Prerequisites
 - Python 3.9+
 - Docker & Docker Compose
 - Git
 
-### 2. Installation
+---
+
+### 2️⃣ Installation
 ```bash
-# Create venv
 python3 -m venv venv
 source venv/bin/activate
-
-# Install dependencies
 pip install -r requirements.txt
 ```
 
-### 3. Generate Data
-Create synthetic transaction data mimicking fraud patterns:
+---
+### Use this command in your project root to initialize DVC:
+```bash
+dvc init
+```
+
+### 3️⃣ Generate Data
 ```bash
 python src/utils/generate_data.py
-# Initialize DVC (if not already)
-dvc init
-dvc add data/raw/transactions.csv
 ```
 
-### 4. Run Tests
-Verify feature engineering logic:
-```bash
-pytest tests/
-```
+---
 
-### 5. Train Model
-Run the training pipeline with K-Fold validation:
+### 4️⃣ Train Models (Local)
 ```bash
 python src/models/train.py
 ```
-*Check `./mlruns` (or `mlflow ui`) to see experiments.*
+This trains:
+- Logistic Regression model  
+- XGBoost model  
+and logs both to MLflow.
 
-### 6. Drift Detection
-Simulate and check for data drift:
+---
+
+### 5️⃣ Run Full Stack (Docker)
 ```bash
-python src/monitoring/drift.py
+docker compose up --build
 ```
 
-### 7. Run Inference Service
-Start the full stack (API + MLflow + Redis):
-```bash
-docker-compose up --build
+This starts:
+- Redis
+- MLflow
+- Trainer service
+- Fraud API
+
+---
+
+## 🔍 API Endpoints
+
+### Health
+```http
+GET /health
 ```
 
-**Test Prediction:**
-```bash
-curl -X POST "http://localhost:8000/predict" \
--H "Content-Type: application/json" \
--d '{
-  "timestamp": "2023-10-27T10:00:00",
-  "customer_id": "C123456", 
-  "merchant_id": "M_TEST", 
-  "amount": 5000.0, 
-  "lat": 50.0, 
-  "long": 50.0
-}'
+### Predict
+```http
+POST /predict
 ```
 
-**Expected Response**:
+---
+
+## 🧪 Testing Payloads
+
+### ✅ LEGIT
 ```json
 {
-  "prediction": "FRAUD",
-  "probability": 1.0,
-  "explanation": { ... },
-  "model_version": "..."
+  "timestamp": "2026-02-06T10:00:00",
+  "customer_id": "C777777",
+  "merchant_id": "Grocery",
+  "amount": 400,
+  "lat": 12.9,
+  "long": 77.6
 }
 ```
 
-## 📋 MLOps Workflow
+```json
+{
+  "timestamp": "2026-02-06T16:10:00",
+  "customer_id": "C100002",
+  "merchant_id": "Amazon",
+  "amount": 1200,
+  "lat": 13.0,
+  "long": 77.5
+}
+```
 
-1. **Development**:
-   - Data scientists work in `notebooks/` and refactor logic to `src/features/`.
-   - Run `pytest` to ensure logic validity.
+---
 
-2. **Training**:
-   - `train.py` pulls data via DVC (automating `dvc pull`).
-   - Feature Store saves offline parquet.
-   - Model and metrics logged to MLflow under `fraud_detection_baseline`.
+### 🚨 FRAUD
+```json
+{
+  "timestamp": "2026-02-06T02:30:00",
+  "customer_id": "C100004",
+  "merchant_id": "Crypto",
+  "amount": 4500,
+  "lat": 13.1,
+  "long": 77.6
+}
+```
 
-3. **Deployment**:
-   - `app.py` loads the latest Production model from MLflow.
-   - Retrieves online features from Redis (populated by ingestion pipeline - mocked for POC).
+```json
+{
+  "timestamp": "2026-02-05T02:10:00",
+  "customer_id": "C000010",
+  "merchant_id": "Electronics",
+  "amount": 12000,
+  "lat": 41.5,
+  "long": 120.2
+}
+```
+
+---
+
+## 📌 Key Design Principles
+
+- No training-serving skew
+- Feature consistency via shared logic
+- ML + rule hybrid fraud detection
+- Fully reproducible via Docker
+- Real-time inference (<100ms)
+- Enterprise-style architecture
+
+---
+
+## 👨‍💻 Author
+
+Built as a real-time MLOps fraud detection system using ensemble modeling (Logistic Regression + XGBoost) with feature store and real-time inference.
+
+
+📐 Logical Architecture (how data flows)
+----------------------------------------
+pgsql
+
+                ┌──────────────────────────┐
+                │   generate_data.py       │
+                │  (synthetic transactions)│
+                └────────────┬─────────────┘
+                             │
+                             ▼
+                ┌──────────────────────────┐
+                │  transactions.csv        │
+                │  (DVC tracked dataset)   │
+                └────────────┬─────────────┘
+                             │
+                             ▼
+        ┌────────────────────────────────────┐
+        │        train.py (Offline)          │
+        │  - Feature Engineering             │
+        │  - Logistic Regression             │
+        │  - XGBoost                         │
+        │  - Ensemble ready                  │
+        └────────────┬─────────────┬────────┘
+                     │             │
+                     ▼             ▼
+        ┌────────────────┐   ┌────────────────┐
+        │  MLflow        │   │  Metrics        │
+        │  Model Store   │   │ Precision, AUC  │
+        └───────┬────────┘   └────────────────┘
+                │
+                ▼
+     ┌───────────────────────────────┐
+     │        FastAPI (app.py)       │
+     │  - Loads LR + XGB models      │
+     │  - Ensemble probability       │
+     │  - Rule + ML hybrid logic     │
+     └───────────┬───────────┬──────┘
+                 │           │
+                 ▼           ▼
+        ┌──────────────┐   ┌─────────────────┐
+        │   Redis      │   │   Client / User │
+        │ FeatureStore │   │   / Bank App    │
+        └──────────────┘   └─────────────────┘

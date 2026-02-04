@@ -142,3 +142,5 @@ cython_debug/
 !/data/**/.gitignore
 mlruns/
 .dvc/tmp
+
+.DS_Store
