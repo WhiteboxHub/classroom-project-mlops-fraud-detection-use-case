@@ -14,6 +14,8 @@ from src.features.features import calculate_features
 mlflow.set_tracking_uri(os.getenv("MLFLOW_TRACKING_URI", "http://mlflow:5000"))
 mlflow.set_experiment("fraud_detection_xgb")
 
+ENSEMBLE_THRESHOLD = 0.6  #  SAME threshold used in serving
+
 print("Loading data...")
 df = pd.read_csv("data/raw/transactions.csv")
 
@@ -72,12 +74,14 @@ with mlflow.start_run():
     xgb_prob = xgb_pipeline.predict_proba(X)[:, 1]
 
     ensemble_prob = 0.5 * lr_prob + 0.5 * xgb_prob
-    ensemble_pred = (ensemble_prob >= 0.25).astype(int)
+    ensemble_pred = (ensemble_prob >= ENSEMBLE_THRESHOLD).astype(int)
 
     mlflow.log_metric("precision", precision_score(y, ensemble_pred))
     mlflow.log_metric("recall", recall_score(y, ensemble_pred))
     mlflow.log_metric("f1", f1_score(y, ensemble_pred))
     mlflow.log_metric("roc_auc", roc_auc_score(y, ensemble_prob))
+
+    mlflow.log_param("ensemble_threshold", ENSEMBLE_THRESHOLD)
 
     mlflow.sklearn.log_model(lr_pipeline, "lr_model")
     mlflow.sklearn.log_model(xgb_pipeline, "xgb_model")

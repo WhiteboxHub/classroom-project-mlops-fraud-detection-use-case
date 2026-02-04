@@ -16,7 +16,7 @@ xgb_model = None
 feature_store = None
 RUN_ID = None
 
-ML_THRESHOLD = 0.25   # ensemble threshold
+ENSEMBLE_THRESHOLD = 0.6   # SAME as training
 
 FEATURES = [
     "amount",
@@ -100,14 +100,17 @@ def predict(req: TransactionRequest):
     if lr_model is None or xgb_model is None:
         raise HTTPException(status_code=503, detail="Models not loaded")
 
-    customer_features = feature_store.get_online_features(req.customer_id) or {}
+    customer_features = feature_store.get_online_features(req.customer_id)
+
+    has_history = customer_features is not None  # TRUE cold-start check
 
     df = pd.DataFrame([req.dict()])
     df = add_time_features(df)
 
-    for k, v in customer_features.items():
-        if k not in df.columns:
-            df[k] = v
+    if customer_features:
+        for k, v in customer_features.items():
+            if k not in df.columns:
+                df[k] = v
 
     for col in FEATURES:
         if col not in df.columns:
@@ -125,10 +128,7 @@ def predict(req: TransactionRequest):
 
     final_prob = 0.5 * lr_prob + 0.5 * xgb_prob
 
-    # ---------- HYBRID RULE + ENSEMBLE ----------
-    has_history = "avg_amount_7d" in customer_features
-
-    # Rule-based fraud (always trusted)
+    # ---------- RULES FIRST ----------
     if df["amount_ratio"].iloc[0] > 3:
         prediction = "FRAUD"
         reason = "amount_spike"
@@ -137,8 +137,8 @@ def predict(req: TransactionRequest):
         prediction = "FRAUD"
         reason = "night_high_value"
 
-    # ML only if history exists
-    elif has_history and final_prob >= 0.6:
+    # ---------- ML ONLY IF HISTORY ----------
+    elif has_history and final_prob >= ENSEMBLE_THRESHOLD:
         prediction = "FRAUD"
         reason = "ml_probability"
 
