@@ -147,23 +147,33 @@ ML + deterministic rules are combined.
 
 ## ⚡ Quick Start (Local)
 
-### 1️⃣ Prerequisites
-- Python 3.9+
-- Docker & Docker Compose
-- Git
+### 1. Prerequisites
+- **Python 3.9+** (Ensure it's added to your PATH)
+- **Docker Desktop** (Make sure it is running)
+- **Git**
 
----
+### 2. Installation
 
-### 2️⃣ Installation
+Open your terminal (PowerShell or Command Prompt) and run:
+
 ```bash
-python3 -m venv venv
-source venv/bin/activate
+# Create virtual environment
+python -m venv venv
+
+# Activate virtual environment (Windows)
+.\venv\Scripts\activate
+
+# Install dependencies
 pip install -r requirements.txt
 ```
 
----
-### Use this command in your project root to initialize DVC:
+### 3. Generate Data
+Create synthetic transaction data mimicking fraud patterns. This script creates `data/raw/transactions.csv`.
+
 ```bash
+python src/utils/generate_data.py
+
+# Initialize DVC (first time only)
 dvc init
 ```
 
@@ -250,6 +260,55 @@ POST /predict
   "long": 77.6
 }
 ```
+5.  Click **Execute** and check the response.
+
+#### 2. Windows PowerShell
+Open a new terminal window:
+```powershell
+$body = @{
+    timestamp = "2023-10-27T10:00:00",
+    customer_id = "C999999",
+    merchant_id = "M_SCAM",
+    amount = 9000.0,
+    lat = 45.0,
+    long = 45.0
+} | ConvertTo-Json
+
+Invoke-RestMethod -Uri "http://localhost:8000/predict" -Method Post -ContentType "application/json" -Body $body
+```
+
+#### 3. Sample Data
+Use these JSON snippets for testing in Swagger UI or Postman:
+
+**High Value Fraud Pattern:**
+```json
+{
+  "timestamp": "2023-10-27T12:00:00",
+  "customer_id": "C_TEST_01",
+  "merchant_id": "M_TEST_01",
+  "amount": 5500.00,
+  "lat": 40.71,
+  "long": -74.00
+}
+```
+
+**Normal Transaction (Low Amount):**
+```json
+{
+  "timestamp": "2023-10-27T12:05:00",
+  "customer_id": "C_TEST_02",
+  "merchant_id": "M_TEST_02",
+  "amount": 25.50,
+  "lat": 40.71,
+  "long": -74.00
+}
+```
+
+#### 4. Troubleshooting
+- **Connection Refused**: Ensure `docker-compose` is running.
+- **Internal Server Error**: Check the Docker terminal output for Python errors.
+- **Verify Training**: Check [http://localhost:5000](http://localhost:5000) for MLflow experiments.
+- **Dependency Mismatch**: If you see `InconsistentVersionWarning`, ensure local and Docker use the same `scikit-learn` version (currently `1.6.1`). Fix by running `pip install -r requirements.txt` locally and retraining.
 
 ```json
 {
